@@ -1,0 +1,377 @@
+library(writexl) #To fix this design matrix for reuse under (n,p,p0)
+library(CVXR) # for convex optimization
+library(glmnet) #for lasso
+
+
+
+
+n=500 ## SAMPLE SIZE
+## change n accordingly
+
+p=7 ## number of parameter components
+p_0=4 #non zero components
+
+
+
+beta=vector()
+
+for(j in 1:p)
+{
+  if(j<=p_0)
+  {
+    beta[j]= 0.5*j*((-1)^j)
+  }
+  else{
+    beta[j]=0
+  }
+}
+beta  #true parameter choice
+
+
+
+library(MASS) #for multivariate normal sampling
+mu= rep(0,p)  ## mean vector with all zero components
+mu
+cov_matrix = matrix(NA,p,p)
+for(i in 1:p)
+{
+  for(j in 1:p)
+  {
+    if(i==j)
+    {
+      cov_matrix[i,j] = 1
+    }
+    else
+    {
+      cov_matrix[i,j]= 0.3^(abs(i-j))
+    }
+  }
+}
+cov_matrix #covariance matrix
+
+
+x = mvrnorm(n,mu,cov_matrix) # matrix, drawn from multivariate normal with above mean and covariance structure
+x
+
+uv= as.matrix(rep(1,n))
+uv
+x_int1=cbind(uv,x)
+x_int1
+x_int=as.matrix(x_int1)
+x_int # earlier design matrix with first column all with 1
+
+design1=as.data.frame(x)
+design1
+write_xlsx(design1,path = "E://first work revised//AOS Linear CV//linear_CV_500_7_4.xlsx") # change the path according to your own directory named as "linear_CV_500_7_4.xlsx"
+
+
+z = scale(x,T,F) ## design matrix without intercept column, is just centered which will be used as actual design matrix throuhout.
+z
+z_int = scale(x_int,T,F)
+z_int
+
+P = vector()
+for (i in 1:n)
+{
+  P[i]= (z[i,]%*%beta)  ## from identity link relation for mean parameter of gaussian.
+}
+P #  mean vector of n components with which n standard Gaussian response variables will be drawn.
+
+
+simulation = 500 # entire iteration of data to be done
+width_matrix = matrix(NA, simulation,p) #both sided CI matrix width, (upper confidence limit-lower confidence limit) for each component
+count_coverage = matrix(NA,simulation,p) # both sided empirical coverage count matrix, count is 1 if true parameter value falls within both sided limit
+count_coverage_right = matrix(NA,simulation,p) #right sided empirical coverage count matrix
+count_coverage_left = matrix(NA,simulation,p)  # left sided empirical coverage count matrix
+count_norm_matrix = matrix(NA,simulation,1) # count coverage in terms of euclidean norm 
+
+
+for(m in 1:simulation)
+{
+  y= vector()
+  for(i in 1:n)
+  {
+    y[i]= rnorm(1,mean=P[i], sd= 1) 
+  }
+  y  # standard Gaussian response vector of n components. 
+  
+  
+  y_final = data.frame(y)
+  x_final = data.frame(z)
+  linear_data = cbind(y,z)
+  linear_data_final = data.frame(linear_data)
+  
+  
+  CV = cv.glmnet(x=z,y=linear_data_final$y,family= gaussian(link = "identity"),alpha=1,type.measure = "deviance",intercept=F,nfolds = 10)
+  CV #cross validation for optimal lambda in linear regression.
+  lambda_opt_sc = CV$lambda.min
+  lambda_opt_sc
+  hat_lambda_lasso_kfold=n*lambda_opt_sc
+  hat_lambda_lasso_kfold ## \hat{\lambda}_{n,K}: K-fold CV based lasso estimator
+  
+  
+  #extracting lasso coefficients
+  v <- Variable(p)
+  objective <- 0.5*sum_squares(y - z %*% v) + hat_lambda_lasso_kfold*p_norm(v,1)
+  problem <- Problem(Minimize(objective))
+  result <- solve(problem)
+  beta_hat <- result$getValue(v)
+  beta_hat_lasso_kfold_cv=beta_hat #lasso estimate of true parameter at k-fold cv estimator
+  beta_hat_lasso_kfold_cv
+  
+  #centered distribution of (lasso estimate-original parameter)*sqrt(n)
+  stat3= sqrt(n)*(beta_hat_lasso_kfold_cv-beta) 
+  stat3
+  stat4= as.matrix(stat3)
+  stat4
+  
+  # euclidean norm of above to check empirical coverage probabilities of parameter vector for 90% CI in terms of norm
+  stat3_norm = norm(stat4,type = "f") 
+  stat3_norm
+  
+  # Next we do, thresholding of Lasso estimator
+  ##we will choose via a_n=n^(-c) for 0<c<1/2, precisely c=1/3 
+  
+  a_n = n^(-(1/3)) 
+  beta_tilde_lasso_kfold_cv = vector()
+  for(i in 1:p)
+  {
+    if(abs(beta_hat_lasso_kfold_cv[i])>a_n)
+    {
+      beta_tilde_lasso_kfold_cv[i]= beta_hat_lasso_kfold_cv[i]
+    }
+    else
+    {
+      beta_tilde_lasso_kfold_cv[i]=0
+    }
+  }
+  beta_tilde_lasso_kfold_cv #thresholded lasso estimate at k fold cv
+  
+  
+  P_tilde = vector()
+  for(i in 1:n)
+  {
+    P_tilde[i]= (z[i,]%*%beta_tilde_lasso_kfold_cv) ## relation from identity link
+  }
+  P_tilde  #mean vector at beta tilde
+  
+  
+  B=n #bootstrap iterations to be made
+  beta_bootstrap = matrix(NA,B,p) # collect B copies of bootstrap estimate of lasso estimator
+  for(c in 1:B)
+  {
+    ## Perturbation Bootstrap Quantities Generation
+    G_boot = matrix(NA,n,1)
+    for (j in 1:n)
+    {
+      G_boot[j,1]= rexp(1,1) ## extract n iid exp(1) r.v for each stage optimization in objective function.
+    }
+    
+    G_boot #perturbation quantities from known density Exp(1), n copies at each stage, repeat B times 
+    
+    
+    ## Perturbed Terms
+    PB_z=vector()
+    for (i in 1:n) {
+     PB_z[i]= P_tilde[i]+(y[i]-P_tilde[i])*(G_boot[i]-1)
+    }
+    PB_z
+    
+    PB_response_final=data.frame(PB_z)
+    PB_linear_data=cbind(PB_z,z)
+    PB_linear_data_final=data.frame(PB_linear_data)
+    
+    
+    PB_CV = cv.glmnet(x=z,y=PB_linear_data_final$PB_z,family= gaussian(link = "identity"),alpha=1,type.measure = "deviance",intercept=F,nfolds = 10)
+    PB_CV #cross validation for optimal lambda in PB linear regression.
+    PB_lambda_opt_sc = PB_CV$lambda.min
+    PB_lambda_opt_sc
+    PB_hat_lambda_lasso_kfold=n*PB_lambda_opt_sc
+    PB_hat_lambda_lasso_kfold ## \hat{\lambda}^*_{n,K}: K-fold CV based PB-lasso estimator
+    
+    
+    
+    #extracting PB-lasso coefficients
+    u <- Variable(p)
+    objective_boot <- 0.5*sum_squares(PB_z - z %*% u) + PB_hat_lambda_lasso_kfold*p_norm(u,1)
+    problem_boot <- Problem(Minimize(objective_boot))
+    result_boot <- solve(problem_boot)
+    beta_hat_boot <- result_boot$getValue(u)
+    beta_hat_boot
+    PB_beta_hat_lasso_kfold_cv=beta_hat_boot #PB-lasso estimate at k-fold PB-cv estimator
+    PB_beta_hat_lasso_kfold_cv
+    
+    beta_bootstrap[c,]=t(PB_beta_hat_lasso_kfold_cv)
+    
+  }
+  beta_bootstrap ##This matrix is important to construct Bootstrap Percentile Intervals
+  
+  
+  ## unit vector of B replicas of 1
+  unit_vector = as.matrix(rep(1,B))
+  beta_tilde_matrix = unit_vector%*%beta_tilde_lasso_kfold_cv
+  beta_tilde_matrix
+  
+  
+  ## Tau boot is the matrix containing B copies of centered estimator vector sqrt(n)*(Bootstrap estimator - thresholded lasso estimator)
+  tau_boot= matrix(NA,B,p)
+  for(i in 1:B){
+    for(j in 1:p){
+      tau_boot[i,j]=sqrt(n)*(beta_bootstrap[i,j]-beta_tilde_matrix[i,j])
+    }
+  }
+  tau_boot ## B copies of centered bootstrap-beta tilde distribution scaled with sqrt n
+  
+  
+  sorted_tau_boot = apply(tau_boot,2,sort)
+  sorted_tau_boot ## independent column wise sorting of tau boot for getting critical value in percentile intervals
+  
+  
+  alpha = 0.10 #level of significance
+  lower_index = as.integer(B*(alpha/2)) #both sided
+  upper_index = 1+ as.integer(B*(1-(alpha/2))) #both sided
+  index_right = as.integer(B*alpha) #right sided
+  index_left = 1+ as.integer(B*(1-alpha)) #left sided
+  
+  lower_index
+  upper_index
+  index_left
+  index_right
+  
+  tau_boot_norm = matrix(NA,B,1) #euclidean norm of each row of tau boot
+  for(i in 1:B){
+    tau_boot_norm[i,1]= norm(as.matrix(tau_boot[i,]),type = "f")
+  }
+  tau_boot_norm
+  
+  sorted_tau_boot_norm = apply(tau_boot_norm,2,sort) #sorted
+  sorted_tau_boot_norm
+  
+  if(stat3_norm<=sorted_tau_boot_norm[index_left,1]){
+    count_norm = 1
+  }else
+  {
+    count_norm = 0
+    
+  }
+  count_norm_matrix[m,1]=count_norm #count if stat3norm is less than sorted tauboot norm at 0.90 level
+  
+  critical_value_matrix = matrix(NA,2,p)
+  for(j in 1:p)
+  {
+    critical_value_matrix[1,j]= -(sorted_tau_boot[upper_index,j])/sqrt(n)
+    critical_value_matrix[2,j]= -(sorted_tau_boot[lower_index,j])/sqrt(n)
+  }
+  critical_value_matrix #both sided
+  
+  critical_value_matrix_right = matrix(NA,1,p)
+  right_confidence_limit_matrix = matrix(NA,1,p)
+  for(j in 1:p){
+    critical_value_matrix_right[1,j] = -(sorted_tau_boot[index_right,j])/sqrt(n)
+    right_confidence_limit_matrix[1,j]= beta_hat_lasso_kfold_cv[j]+critical_value_matrix_right[1,j]
+  }
+  critical_value_matrix_right
+  right_confidence_limit_matrix #right sided
+  
+  critical_value_matrix_left = matrix(NA,1,p)
+  left_confidence_limit_matrix = matrix(NA,1,p)
+  for(j in 1:p){
+    critical_value_matrix_left[1,j] = -(sorted_tau_boot[index_left,j])/sqrt(n)
+    left_confidence_limit_matrix[1,j]= beta_hat_lasso_kfold_cv[j]+critical_value_matrix_left[1,j]
+  }
+  critical_value_matrix_left
+  left_confidence_limit_matrix #left sided
+  
+  
+  lower_confidence_limit_matrix = matrix(NA,1,p)
+  upper_confidence_limit_matrix = matrix(NA,1,p)
+  for(j in 1:p)
+  {
+    lower_confidence_limit_matrix[1,j]= beta_hat_lasso_kfold_cv[j]+critical_value_matrix[1,j]
+    upper_confidence_limit_matrix[1,j]= beta_hat_lasso_kfold_cv[j]+critical_value_matrix[2,j]
+  }
+  lower_confidence_limit_matrix
+  upper_confidence_limit_matrix #both sided
+  
+  
+  count_beta_right = matrix(NA,1,p)
+  for(j in 1:p){
+    if(beta[j]<=right_confidence_limit_matrix[1,j]){
+      count_beta_right[1,j]=1
+    }
+    else{
+      count_beta_right[1,j]=0
+    }
+  }
+  count_beta_right
+  
+  count_beta_left = matrix(NA,1,p)
+  for(j in 1:p){
+    if(beta[j]>=left_confidence_limit_matrix[1,j]){
+      count_beta_left[1,j]=1
+    }
+    else{
+      count_beta_left[1,j]=0
+    }
+  }
+  count_beta_left
+  
+  count_beta = matrix(NA,1,p)
+  for(j in 1:p)
+  {
+    if(beta[j]>= lower_confidence_limit_matrix[1,j] && beta[j]<= upper_confidence_limit_matrix[1,j])
+    {
+      count_beta[1,j]= 1
+    }
+    else
+    {
+      count_beta[1,j]= 0
+    }
+  }
+  count_beta
+  
+  
+  width_matrix[m,] = upper_confidence_limit_matrix[1,]-lower_confidence_limit_matrix[1,]
+  count_coverage[m,] = count_beta[1,]
+  count_coverage_right[m,]=count_beta_right[1,]
+  count_coverage_left[m,]= count_beta_left[1,]
+  
+}  
+width_matrix
+count_coverage
+count_coverage_right
+count_coverage_left
+count_norm_matrix
+
+
+average_width_matrix = matrix(NA,1,p)
+for(j in 1:p)
+{
+  average_width_matrix[1,j] = mean(width_matrix[,j])
+}
+average_width_matrix
+
+
+coverage_probability_right = matrix(NA,1,p)
+for(j in 1:p){
+  coverage_probability_right[1,j]= mean(count_coverage_right[,j])
+}
+coverage_probability_right ## Right sided empirical coverage probability of right sided 90% CI
+
+coverage_probability_left = matrix(NA,1,p)
+for(j in 1:p){
+  coverage_probability_left[1,j]= mean(count_coverage_left[,j])
+}
+coverage_probability_left ## Left sided empirical coverage probability of left sided 90% CI
+
+
+coverage_probability = matrix(NA, nrow=1, ncol= p)
+for(j in 1:p)
+{
+  coverage_probability[1,j]= mean(count_coverage[,j])
+}
+coverage_probability ## both sided empirical coverage probability of 90% CI
+
+count_norm_coverage_probability = mean(count_norm_matrix[,1])
+count_norm_coverage_probability
+
