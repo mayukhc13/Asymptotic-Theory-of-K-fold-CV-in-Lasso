@@ -1,0 +1,180 @@
+library(glmnet) #for lasso
+
+# Load and read the prostate cancer data
+url <- "https://web.stanford.edu/~hastie/ElemStatLearn/datasets/prostate.data"
+prostate <- read.table(url, header = TRUE)
+head(prostate)
+prostate_data <- subset(prostate, select = -train)
+
+# Define response and predictors
+X <- as.matrix(subset(prostate_data, select = -lpsa)) #design matrix
+y <- prostate_data$lpsa #response vector
+
+#Set up the Parameters
+n=97
+p=8
+
+
+#Find the optimal cv choice
+lambda_seq=n*(10^seq(1,-3,length.out=200))
+lambda_seq
+CV=cv.glmnet(X,y,alpha=1,nfolds = 10,family=gaussian(link = "identity"),lambda = lambda_seq)
+hat_lambda_lasso_kfold= CV$lambda.min
+hat_lambda_lasso_kfold #hat_lambda_n,K in the theory notation
+
+
+
+#extracting lasso coefficients
+fit_lasso=glmnet(X,y,alpha=1,family = gaussian(link = "identity"),lambda = hat_lambda_lasso_kfold)
+beta_lasso=coef(fit_lasso)
+beta_lasso
+beta_hat_lasso=as.matrix(beta_lasso)
+beta_hat_lasso
+beta_hat_lasso_kfold_cv=beta_hat_lasso[-1]
+beta_hat_lasso_kfold_cv ## lasso coefficients
+
+
+# Next we do, thresholding of Lasso estimator to make variable selection consistent for bootstrap percentile intervals
+a_n = n^(-(1/3)) 
+beta_tilde_lasso_kfold_cv = vector()
+for(i in 1:p)
+{
+  if(abs(beta_hat_lasso_kfold_cv[i])>a_n)
+  {
+    beta_tilde_lasso_kfold_cv[i]= beta_hat_lasso_kfold_cv[i]
+  }
+  else
+  {
+    beta_tilde_lasso_kfold_cv[i]=0
+  }
+}
+beta_tilde_lasso_kfold_cv #thresholded lasso estimate at k fold cv
+
+## values at thresholded lasso
+P_tilde = vector()
+for(i in 1:n)
+{
+  P_tilde[i]= (X[i,]%*%beta_tilde_lasso_kfold_cv) ## relation from identity link
+}
+P_tilde  #mean vector at beta tilde
+
+B=150 #bootstrap iterations to be made
+beta_bootstrap = matrix(NA,B,p) # collect B copies of bootstrap estimate of lasso estimator
+for(c in 1:B)
+{
+  ## Perturbation Bootstrap Quantities Generation
+  G_boot = matrix(NA,n,1)
+  for (j in 1:n)
+  {
+    G_boot[j,1]= rexp(1,1) ## extract n iid exp(1) r.v for each stage optimization in objective function.
+  }
+  
+  G_boot #perturbation quantities from known density Exp(1), n copies at each stage, repeat B times 
+  
+  
+  ## Perturbed Terms
+  PB_z=vector()
+  for (i in 1:n) {
+    PB_z[i]= P_tilde[i]+(y[i]-P_tilde[i])*(G_boot[i]-1)
+  }
+  PB_z
+  
+  PB_response_final=data.frame(PB_z)
+  PB_linear_data=cbind(PB_z,X)
+  PB_linear_data_final=data.frame(PB_linear_data)
+  
+  
+  #PB Cross-validated optimal value
+  PB_CV = cv.glmnet(X,y=PB_linear_data_final$PB_z,family= gaussian(link = "identity"),alpha=1,lambda = lambda_seq,nfolds = 10)
+  PB_CV #cross validation for optimal lambda in PB linear regression.
+  PB_hat_lambda_lasso_kfold=PB_CV$lambda.min
+  PB_hat_lambda_lasso_kfold ## \hat{\lambda}^*_{n,K}: K-fold CV based PB-lasso estimator
+  
+  #extracting PB-lasso coefficients
+  fit_boot=glmnet(X,y=PB_linear_data_final$PB_z,family= gaussian(link = "identity"),alpha=1,lambda=PB_hat_lambda_lasso_kfold)
+  boot_coeff=coef(fit_boot)
+  boot_coeff
+  beta_hat_boot <- as.matrix(boot_coeff)
+  PB_beta_hat_lasso_kfold_cv=beta_hat_boot[-1] #PB-lasso estimate at k-fold PB-cv estimator
+  PB_beta_hat_lasso_kfold_cv
+  
+  beta_bootstrap[c,]=t(PB_beta_hat_lasso_kfold_cv)
+  
+}
+
+beta_bootstrap ##This matrix is important to construct Bootstrap Percentile Intervals
+
+
+## unit vector of B replicas of 1
+unit_vector = as.matrix(rep(1,B))
+beta_tilde_matrix = unit_vector%*%beta_tilde_lasso_kfold_cv
+beta_tilde_matrix
+
+
+## Tau boot is the matrix containing B copies of centered estimator vector sqrt(n)*(Bootstrap estimator - thresholded lasso estimator)
+tau_boot= matrix(NA,B,p)
+for(i in 1:B){
+  for(j in 1:p){
+    tau_boot[i,j]=sqrt(n)*(beta_bootstrap[i,j]-beta_tilde_matrix[i,j])
+  }
+}
+tau_boot ## B copies of centered bootstrap-beta tilde distribution scaled with sqrt n
+
+
+sorted_tau_boot = apply(tau_boot,2,sort)
+sorted_tau_boot ## independent column wise sorting of tau boot for getting critical value in percentile intervals
+
+
+alpha = 0.10 #level of significance
+lower_index = as.integer(B*(alpha/2)) #both sided
+upper_index = 1+ as.integer(B*(1-(alpha/2))) #both sided
+index_right = as.integer(B*alpha) #right sided
+index_left = 1+ as.integer(B*(1-alpha)) #left sided
+
+lower_index
+upper_index
+index_left
+index_right
+
+
+critical_value_matrix = matrix(NA,2,p)
+for(j in 1:p)
+{
+  critical_value_matrix[1,j]= -(sorted_tau_boot[upper_index,j])/sqrt(n)
+  critical_value_matrix[2,j]= -(sorted_tau_boot[lower_index,j])/sqrt(n)
+}
+critical_value_matrix #both sided
+
+#Both sided Perturbation Bootstrap percentile Intervals
+lower_confidence_limit_matrix = matrix(NA,1,p)
+upper_confidence_limit_matrix = matrix(NA,1,p)
+for(j in 1:p)
+{
+  lower_confidence_limit_matrix[1,j]= beta_hat_lasso_kfold_cv[j]+critical_value_matrix[1,j]
+  upper_confidence_limit_matrix[1,j]= beta_hat_lasso_kfold_cv[j]+critical_value_matrix[2,j]
+}
+lower_confidence_limit_matrix
+upper_confidence_limit_matrix #both sided
+
+
+#Right Sided Perturabation Bootstrap Percentile Intervals of the form (-\infty,x)
+critical_value_matrix_right = matrix(NA,1,p)
+right_confidence_limit_matrix = matrix(NA,1,p)
+for(j in 1:p){
+  critical_value_matrix_right[1,j] = -(sorted_tau_boot[index_right,j])/sqrt(n)
+  right_confidence_limit_matrix[1,j]= beta_hat_lasso_kfold_cv[j]+critical_value_matrix_right[1,j]
+}
+critical_value_matrix_right
+right_confidence_limit_matrix #right sided
+
+
+#Left Sided Perturabation Bootstrap Percentile Intervals of the form (x,\infty)
+critical_value_matrix_left = matrix(NA,1,p)
+left_confidence_limit_matrix = matrix(NA,1,p)
+for(j in 1:p){
+  critical_value_matrix_left[1,j] = -(sorted_tau_boot[index_left,j])/sqrt(n)
+  left_confidence_limit_matrix[1,j]= beta_hat_lasso_kfold_cv[j]+critical_value_matrix_left[1,j]
+}
+critical_value_matrix_left
+left_confidence_limit_matrix #left sided
+
