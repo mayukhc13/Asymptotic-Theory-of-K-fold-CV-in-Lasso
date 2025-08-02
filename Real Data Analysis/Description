@@ -1,0 +1,24 @@
+Prostate Cancer Data is a well-known repository which is an original work by T. A. Stamey, J. N. Kabalin, J. E. McNeal, I. M. Johnstone, F. Freiha, E. A.
+Redwine, and N. Yang. Prostate specific antigen in the diagnosis and treatment
+of adenocarcinoma of the prostate. ii. radical prostatectomy treated patients. The
+Journal of urology, 141(5):1076–1083, 1989.
+
+
+First Appearance as a benchmark example in R. Tibshirani. Regression shrinkage and selection via the lasso. Journal of the Royal
+Statistical Society Series B: Statistical Methodology, 58(1):267–288, 1996
+
+Data Set available at: https://web.stanford.edu/~hastie/ElemStatLearn/datasets/prostate.data
+
+Number of Observations or instances: 97
+Number of Covariates or features: 8
+Number of Response variable: 1 
+
+Data Description and Objective: The prostate cancer data set examined the relationship between prostate-specific antigen (PSA) levels and several clinical measurements in men prior to undergoing radical prostatectomy. PSA is a protein produced by the prostate gland, and elevated levels can indicate the presence or progression of prostate cancer. The primary objective of this analysis is to model the log-transformed PSA levels (\texttt{lpsa}) as a function of various clinical predictors, using Lasso regression. This helps to identify the most influential clinical factors related to PSA levels through our proposed Bootstrap method.
+
+Response variable: log-transformed PSA levels (\texttt{lpsa})
+Covariates: Log cancer volume (\texttt{lcavol}), Log prostate weight (\texttt{lweight}), Age of patient (\texttt{age}), Log of benign prostatic hyperplasia amount (\texttt{lbph}), Seminal vesicle invasion (\texttt{svi}), Log capsular penetration (\texttt{lcp}), Gleason score (\texttt{gleason}) and
+Percentage of Gleason scores 4 or 5 (\texttt{pgg45}).
+
+Methodology: (i) First we fit 10-fold CV to obtain optimal CV estimate and then fit a lasso linear regression. We estimate the coefficients.
+             (ii) Next we threshold the lasso estimator to make it VSC with a_n=n^{-1/3}
+             (iii) Then we find the 90% Bootstrap percentile intervals as per the theory.
