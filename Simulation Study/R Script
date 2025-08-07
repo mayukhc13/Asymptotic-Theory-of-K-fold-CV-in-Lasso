@@ -5,11 +5,11 @@ library(glmnet) #for lasso
 
 
 
-n=500 ## SAMPLE SIZE
+n=50 ## SAMPLE SIZE
 ## change n accordingly
 
-p=7 ## number of parameter components
-p_0=4 #non zero components
+p=25 ## number of parameter components
+p_0=12 #non zero components
 
 
 
