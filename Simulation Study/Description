@@ -2,8 +2,8 @@ We perform simulations in this section to investigate finite sample performance 
 In particular, we find empirical coverages of nominal 90\% one-sided and two-sided confidence intervals for homoscedastic linear regression parameters. 
 The confidence intervals are obtained for the individual regression coefficients as well as the entire regression vector. The confidence intervals are Bootstrap percentile intervals.
 
-We try to capture finite sample performance under the following set-up: 
-(A.1) $(p,p_0)=(25,12)$ over $n \in \{30, 50, 75, 100\}$ and 
-(A.2) $(p,p_0)=(7,4)$ over $n \in \{50, 100, 150, 300, 500\}$. 
+We try to capture finite sample performance under the following set-up: $(p,p_0)=(25,12)$ over $n \in \{30, 50, 75, 100\}$ with 
+(A.1) $epsilon_i$'s are generated from iid N(0,1) and 
+(A.2) $epsilon_i$'s are generated from iid N(0,\sigma_i) with $\sigma_i=||\bm{x}_i||^{3/2}$. 
 
 In each set-up, the choice of thresholding parameter is taken as $a_n=n^{-1/3}$.
